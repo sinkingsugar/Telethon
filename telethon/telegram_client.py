@@ -18,7 +18,8 @@ from telethon.tl.functions import InitConnectionRequest, InvokeWithLayerRequest
 from telethon.tl.functions.account import GetPasswordRequest
 from telethon.tl.functions.auth import (CheckPasswordRequest, LogOutRequest,
                                         SendCodeRequest, SignInRequest,
-                                        SignUpRequest)
+                                        SignUpRequest, ExportAuthorizationRequest,
+                                        ImportAuthorizationRequest)
 from telethon.tl.functions.auth import ImportBotAuthorizationRequest
 from telethon.tl.functions.help import GetConfigRequest
 from telethon.tl.functions.messages import (
@@ -130,12 +131,7 @@ class TelegramClient:
 
     def reconnect_to_dc(self, dc_id):
         """Reconnects to the specified DC ID. This is automatically called after an InvalidDCError is raised"""
-        if self.dc_options is None or not self.dc_options:
-            raise ConnectionError(
-                "Can't reconnect. Stabilise an initial connection first.")
-
-        dc = next(dc for dc in self.dc_options if dc.id == dc_id)
-
+        dc = self.get_dc(dc_id)
         self.transport.close()
         self.transport = None
         self.session.server_address = dc.ip_address
@@ -143,6 +139,15 @@ class TelegramClient:
         self.session.save()
 
         self.connect(reconnect=True)
+
+    def get_dc(self, dc_id):
+        """Gets the Data Center (DC) given its ID"""
+        if not self.dc_options:
+            raise ConnectionError(
+                'Cannot determine the required data center IP address. '
+                'Stabilise an initial connection first.')
+
+        return next(dc for dc in self.dc_options if dc.id == dc_id)
 
     def disconnect(self):
         """Disconnects from the Telegram server **and pauses all the spawned threads**"""
@@ -163,7 +168,8 @@ class TelegramClient:
            Timeout can be set to None for no timeout.
 
            If throw_invalid_dc is True, these errors won't be caught (useful to
-           avoid infinite recursion). This should not be set to True manually."""
+           avoid infinite recursion). This should not be set to True manually.
+           This error will also be thrown for PHONE_MIGRATE_X (only happens on login)"""
         if not issubclass(type(request), MTProtoRequest):
             raise ValueError('You can only invoke MtProtoRequests')
 
@@ -180,8 +186,71 @@ class TelegramClient:
             if throw_invalid_dc:
                 raise
 
-            self.reconnect_to_dc(error.new_dc)
-            return self.invoke(request, timeout=timeout, throw_invalid_dc=True)
+            # Acquire the lock of the original sender so
+            # that its updates thread has to wait too
+            print('LOCKING ORIGINAL')
+            self.sender.lock.acquire()
+
+            # We need to *temporary connect* to the new DC:
+            # 1. Need to export the authorization from the current DC
+            # 2. Create a sender connected to the required DC
+            # 3. Connect using the new sender, and import the authorization
+            # 4. Finish invoking the request
+            #
+            # TODO: I could actually keep this new .sender alive to:
+            # 1. Avoid going through all these steps all the time
+            # 2. Two connections can potentially run at the same time
+            print('SENDING EXPORT')
+            exported = self.invoke(ExportAuthorizationRequest(error.new_dc),
+                                   timeout=timeout, throw_invalid_dc=True)
+
+            print('EXPORT DONE:', exported)
+            dc = self.get_dc(error.new_dc)
+            new_transport = TcpTransport(dc.ip_address, dc.port, proxy=self.proxy)
+            new_sender = MtProtoSender(new_transport, self.session)
+            print('NEW SENDER CREATED')
+
+            # TODO Duplicated code
+            query = InitConnectionRequest(
+                api_id=self.api_id,
+                device_model=platform.node(),
+                system_version=platform.system(),
+                app_version=self.__version__,
+                lang_code='en',
+                query=GetConfigRequest())
+
+            result = self.invoke(
+                InvokeWithLayerRequest(
+                    layer=layer, query=query))
+
+            print('INITIALIZED CONNECTION:', result)
+            # self.dc_options = result.dc_options
+            # self.signed_in = self.is_user_authorized()
+
+            # Import the authorization
+            print('IMPORTING AUTHORIZATION')
+            import_request = ImportAuthorizationRequest(exported.id, exported.bytes)
+            new_sender.send(import_request)
+            result = new_sender.receive(import_request)
+            # self.session.user = result.user
+            # self.session.save()
+            # self.signed_in = True
+            print('AUTHORIZATION IMPORTED:', result)
+
+            # Reconnection done, finally invoke the original request
+            print('FINALLY SENDING', request)
+            new_sender.send(request)
+            result = new_sender.receive(request, timeout=timeout)
+
+            print('GOT RESULT', result, '; RELEASING LOCK')
+            # Release the lock from the original sender
+            self.sender.lock.release()
+
+            # Close this temporary sender
+            new_sender.disconnect()
+
+            # Return the result
+            return result
 
     # region Authorization requests
 
@@ -194,8 +263,19 @@ class TelegramClient:
 
     def send_code_request(self, phone_number):
         """Sends a code request to the specified phone number"""
-        result = self.invoke(SendCodeRequest(phone_number, self.api_id, self.api_hash))
-        self.phone_code_hashes[phone_number] = result.phone_code_hash
+        # This is a special method, 'PHONE_MIGRATE_X' error messages
+        # only happen on login, where we do need to update the used
+        # DC ID for all the following connections. Only done here.
+        try:
+            request = SendCodeRequest(phone_number, self.api_id, self.api_hash)
+            result = self.invoke(request, throw_invalid_dc=True)
+            self.phone_code_hashes[phone_number] = result.phone_code_hash
+
+        except InvalidDCError as error:
+            self.reconnect_to_dc(error.new_dc)
+            # This shouldn't become an infinite recursive call,
+            # because we just connected to the right DC
+            self.send_code_request(phone_number)
 
     def sign_in(self, phone_number=None, code=None, password=None, bot_token=None):
         """Completes the authorization of a phone number by providing the received code.
