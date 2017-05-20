@@ -211,7 +211,7 @@ class TelegramClient:
             print('NEW SENDER CREATED')
 
             # TODO Duplicated code
-            query = InitConnectionRequest(
+            init_request = InitConnectionRequest(
                 api_id=self.api_id,
                 device_model=platform.node(),
                 system_version=platform.system(),
@@ -219,9 +219,11 @@ class TelegramClient:
                 lang_code='en',
                 query=GetConfigRequest())
 
-            result = self.invoke(
-                InvokeWithLayerRequest(
-                    layer=layer, query=query))
+            query = InvokeWithLayerRequest(layer=layer, query=init_request)
+
+            new_sender.connect()
+            new_sender.send(query)
+            result = new_sender.receive(query)
 
             print('INITIALIZED CONNECTION:', result)
             # self.dc_options = result.dc_options
