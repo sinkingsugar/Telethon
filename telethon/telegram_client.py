@@ -128,12 +128,7 @@ class TelegramClient:
 
     def reconnect_to_dc(self, dc_id):
         """Reconnects to the specified DC ID. This is automatically called after an InvalidDCError is raised"""
-        if self.dc_options is None or not self.dc_options:
-            raise ConnectionError(
-                "Can't reconnect. Stabilise an initial connection first.")
-
-        dc = next(dc for dc in self.dc_options if dc.id == dc_id)
-
+        dc = self.get_dc(dc_id)
         self.transport.close()
         self.transport = None
         self.session.server_address = dc.ip_address
@@ -141,6 +136,15 @@ class TelegramClient:
         self.session.save()
 
         self.connect(reconnect=True)
+
+    def get_dc(self, dc_id):
+        """Gets the Data Center (DC) given its ID"""
+        if not self.dc_options:
+            raise ConnectionError(
+                'Cannot determine the required data center IP address. '
+                'Stabilise an initial connection first.')
+
+        return next(dc for dc in self.dc_options if dc.id == dc_id)
 
     def disconnect(self):
         """Disconnects from the Telegram server **and pauses all the spawned threads**"""
@@ -178,8 +182,76 @@ class TelegramClient:
             if throw_invalid_dc:
                 raise
 
-            self.reconnect_to_dc(error.new_dc)
-            return self.invoke(request, timeout=timeout, throw_invalid_dc=True)
+            if error.message.startswith('FILE_MIGRATE_'):
+                sender = self.get_exported_sender(error.new_dc)
+                sender.send(request)
+                sender.receive(request, timeout)
+                return request.result
+            else:
+                self.reconnect_to_dc(error.new_dc)
+                return self.invoke(request, timeout=timeout, throw_invalid_dc=True)
+
+    def get_exported_sender(self, dc_id):
+        # Following the same approach as badoualy/kotlogram
+        # On file /telegram/api/DefaultTelegramClient.kt
+        # TODO Testing purposes - store these better
+        self.cached_senders = {}  # dc_id: MtProtoSender
+        self.auth_keys = {}  # dc_id: AuthKey
+
+        sender = self.cached_senders.pop(dc_id, None)
+        auth_key = self.auth_keys.get(dc_id)
+
+        if sender and auth_key:
+            # TODO Set it up... init reconnection...
+            return sender
+        else:
+            from telethon.tl.functions.auth import \
+                ExportAuthorizationRequest, ImportAuthorizationRequest
+
+            dc = self.get_dc(dc_id)
+
+            # Step 1. Export the current authorization to the new DC.
+            export_auth = self.invoke(ExportAuthorizationRequest(dc_id))
+
+            # Step 2. Create a transport connected to the new DC.
+            #         We also create a temporary session because
+            #         it's what will contain the required AuthKey
+            #         for MtProtoSender to work.
+            transport = TcpTransport(dc.ip_address, dc.port, proxy=self.proxy)
+            session = Session(None)
+            session.auth_key, session.time_offset = \
+                authenticator.do_authentication(transport)
+
+            # Step 3. After authenticating on the new DC,
+            #         we can create the proper MtProtoSender.
+            sender = MtProtoSender(transport, session)
+            sender.connect()
+
+            # InvokeWithLayer(InitConnection(ImportAuthorization(...)))
+            init_connection = InitConnectionRequest(
+                api_id=self.api_id,
+                device_model=platform.node(),
+                system_version=platform.system(),
+                app_version=self.__version__,
+                lang_code='en',
+                query=ImportAuthorizationRequest(
+                    export_auth.id, export_auth.bytes)
+            )
+            query = InvokeWithLayerRequest(layer=layer, query=init_connection)
+
+            sender.send(query)
+            sender.receive(query)
+
+            # Step 4. We're connected and using the desired layer!
+            auth = init_connection.result
+            # TODO Auth has as used above (auth.user), cache it somewhere
+            #self.auth_keys[dc_id] = auth
+
+            # Don't go through this expensive process every time
+            # TODO Cached clients should disconnect after a while and clean up
+            self.cached_senders[dc_id] = sender
+
+            return sender
 
     # region Authorization requests
 
