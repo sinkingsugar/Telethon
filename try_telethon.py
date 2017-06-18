@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+
 import traceback
 
-from telethon_examples.interactive_telegram_client \
+from telethon_examples.telegram_backup \
     import InteractiveTelegramClient
 
 
