@@ -75,9 +75,9 @@ class ServerError(RPCError):
     code = 500
     message = 'INTERNAL'
 
-    def __init__(self, message):
+    '''def __init__(self, message):
         super().__init__(self, message)
-        self.message = message
+        self.message = message'''
 
 
 class BadMessageError(Exception):
