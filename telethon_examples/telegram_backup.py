@@ -6,9 +6,9 @@ import os.path
 import time
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
-from telethon.errors import ServerError
+from telethon.errors import (ServerError, FloodWaitError)
 from telethon.tl.types import UpdateShortChatMessage, UpdateShortMessage
-from telethon.utils import get_display_name
+from telethon.utils import get_extension
 from telethon.tl.types import (MessageMediaWebPage)
 
 # Get the (current) number of lines in the terminal
@@ -84,6 +84,9 @@ class InteractiveTelegramClient(TelegramClient):
                     self_user = self.sign_in(password=pw)
 
     def run(self):
+        os.makedirs("output/dumps", exist_ok=True)
+        os.makedirs("output/usermedia", exist_ok=True)
+
         # Entities represent the user, chat or channel
         # corresponding to the dialog on the same index
         dialogs, entities = self.get_dialogs(limit=70000)
@@ -120,16 +123,21 @@ class InteractiveTelegramClient(TelegramClient):
                                 caption = getattr(msg.media, 'caption', '')
                                 content = '[[web]:{}] {}'.format(msg.media.webpage, caption)
                             else: #photo, #document, #contact
-                                # msg_media_id = int(msg.id)
-                                # # Let the output be the message ID
-                                # output = str('output/usermedia/{}/{}'.format(senderName, msg_media_id))
-                                # if not os.path.exists(output):
-                                #     print('Downloading media with name {}...'.format(output))
-                                #     output = self.download_msg_media(
-                                #         msg.media,
-                                #         file_path=output,
-                                #         progress_callback=self.download_progress_callback)
-                                #     print('Media downloaded to {}!'.format(output))
+                                msg_media_id = int(msg.id)
+                                # Let the output be the message ID
+                                output = str('output/usermedia/{}/{}'.format(senderName, msg_media_id))
+                                ext = get_extension(msg.media)
+                                if ext is None:
+                                    ext = ""
+                                if not os.path.exists(output + ext):
+                                    print('Downloading media with name {}...'.format(output))
+                                    output = self.download_msg_media(
+                                        msg.media,
+                                        file_path=output,
+                                        progress_callback=self.download_progress_callback)
+                                    print('Media downloaded to {}!'.format(output))
+                                else:
+                                    print('Media already downloaded to {}!'.format(output))
 
                                 #The media may or may not have a caption
                                 caption = getattr(msg.media, 'caption', '')
@@ -156,6 +164,9 @@ class InteractiveTelegramClient(TelegramClient):
 
                 except ServerError:
                     time.sleep(2)
+                except FloodWaitError as e:
+                    print("Flood, waiting " + str(e.seconds) + " seconds.")
+                    time.sleep(e.seconds)
                 finally:
                     time.sleep(1)
 
