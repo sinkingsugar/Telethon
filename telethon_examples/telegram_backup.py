@@ -119,7 +119,7 @@ class InteractiveTelegramClient(TelegramClient):
 
                         # Format the message content
                         if getattr(msg, 'media', None):
-                            if msg.media == MessageMediaWebPage:
+                            if type(msg.media) == MessageMediaWebPage:
                                 caption = getattr(msg.media, 'caption', '')
                                 content = '[[web]:{}] {}'.format(msg.media.webpage, caption)
                             else: #photo, #document, #contact
@@ -167,6 +167,7 @@ class InteractiveTelegramClient(TelegramClient):
                 except FloodWaitError as e:
                     print("Flood, waiting " + str(e.seconds) + " seconds.")
                     time.sleep(e.seconds)
+                    self.reconnect() # we most likely timedout..
                 finally:
                     time.sleep(1)
 
