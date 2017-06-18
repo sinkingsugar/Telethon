@@ -121,7 +121,14 @@ class InteractiveTelegramClient(TelegramClient):
                         if getattr(msg, 'media', None):
                             if type(msg.media) == MessageMediaWebPage:
                                 caption = getattr(msg.media, 'caption', '')
-                                content = '[[web]:{}] {}'.format(msg.media.webpage, caption)
+                                webdict = json.dumps(msg.media.webpage.to_dict(), default=str)
+                                content = '[[web]:{}] {}'.format(webdict, caption)
+                                photo = getattr(msg.media.webpage, 'photo', None)
+                                if photo is not None:
+                                    msg_media_id = int(msg.id)
+                                    output = str('output/usermedia/{}/{}'.format(senderName, msg_media_id)) + ".jpg"
+                                    if not os.path.exists(output):
+                                        self.download_photo(msg.media.webpage, output, False, self.download_progress_callback)
                             else: #photo, #document, #contact
                                 msg_media_id = int(msg.id)
                                 # Let the output be the message ID
