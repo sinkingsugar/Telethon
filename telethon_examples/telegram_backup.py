@@ -4,6 +4,7 @@ from getpass import getpass
 import json
 import os.path
 import time
+import datetime
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
 from telethon.errors import (ServerError, FloodWaitError)
@@ -92,20 +93,36 @@ class InteractiveTelegramClient(TelegramClient):
         dialogs, entities = self.get_dialogs(limit=70000)
 
         dumps = {}
+        minId = {}
         maxId = {}
+
+        if os.path.exists("output/offsets.json"):
+            with open("output/offsets.json") as outfile:
+                maxIdJson = json.load(outfile)
+                for key in maxIdJson:
+                    maxId[int(key)] = maxIdJson[key]
+
         for entity in entities:
-            maxId[entity] = 2147483647
+            minId[entity.id] = 2147483647
+
+            if entity.id not in maxId:
+                maxId[entity.id] = 0
+
+            currentMaxId = maxId[entity.id]
 
             while True:
                 try:
-                    total_count, messages, senders = self.get_message_history(entity, limit=200, offset_id=maxId[entity]) #here you can add an offset! use it!
+                    total_count, messages, senders = self.get_message_history(entity, limit=200, offset_id=minId[entity.id], min_id=maxId[entity.id])
 
                     if len(messages) == 0:
                         break
 
                     for msg, sender in zip(messages, senders):
-                        if msg.id < maxId[entity]:
-                            maxId[entity] = msg.id
+                        if msg.id < minId[entity.id]:
+                            minId[entity.id] = msg.id
+
+                        if msg.id > currentMaxId:
+                            currentMaxId = msg.id
 
                         senderName = "???"
                         if sender:
@@ -121,14 +138,25 @@ class InteractiveTelegramClient(TelegramClient):
                         if getattr(msg, 'media', None):
                             if type(msg.media) == MessageMediaWebPage:
                                 caption = getattr(msg.media, 'caption', '')
-                                webdict = json.dumps(msg.media.webpage.to_dict(), default=str)
-                                content = '[[web]:{}] {}'.format(webdict, caption)
                                 photo = getattr(msg.media.webpage, 'photo', None)
+                                url = getattr(msg.media.webpage, 'url', '')
+                                site_name = getattr(msg.media.webpage, 'site_name', '')
+                                title = getattr(msg.media.webpage, 'title', '')
+                                description = getattr(msg.media.webpage, 'description', '')
+                                content = '[[web]:{}] {}'.format({
+                                    "url": url,
+                                    "site_name": site_name,
+                                    "title": title,
+                                    "description": description}, caption)
                                 if photo is not None:
                                     msg_media_id = int(msg.id)
                                     output = str('output/usermedia/{}/{}'.format(senderName, msg_media_id)) + ".jpg"
                                     if not os.path.exists(output):
-                                        self.download_photo(msg.media.webpage, output, False, self.download_progress_callback)
+                                        print('Downloading Web picture with name {}...'.format(output))
+                                        output = self.download_photo(msg.media.webpage, output, False, self.download_progress_callback)
+                                        print('Web picture downloaded to {}!'.format(output))
+                                    else:
+                                        print('Web picture already downloaded to {}!'.format(output))
                             else: #photo, #document, #contact
                                 msg_media_id = int(msg.id)
                                 # Let the output be the message ID
@@ -158,7 +186,7 @@ class InteractiveTelegramClient(TelegramClient):
                             # Unknown message, simply print its class name
                             content = type(msg).__name__
 
-                        if not senderName in dumps:
+                        if senderName not in dumps:
                             dumps[senderName] = []
                             print("Added sender: " + senderName)
 
@@ -178,9 +206,15 @@ class InteractiveTelegramClient(TelegramClient):
                 finally:
                     time.sleep(1)
 
+            maxId[entity.id] = currentMaxId
+
+        suffix = datetime.datetime.now().strftime("%y%m%d_%H%M%S")
         for key in dumps:
-            with open("output/dumps/" + key + ".json", 'w') as outfile:
+            with open("output/dumps/" + key + "_" + suffix + ".json", 'w') as outfile:
                 json.dump(dumps[key], outfile)
+
+        with open("output/offsets.json", "w") as outfile:
+            json.dump(maxId, outfile)
 
     def send_photo(self, path, entity):
         print('Uploading {}...'.format(path))
