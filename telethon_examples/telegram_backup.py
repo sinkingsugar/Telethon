@@ -133,6 +133,7 @@ class InteractiveTelegramClient(TelegramClient):
                                     senderName = str(sender.id)
                         
                         content = ""
+                        senderName = senderName.replace("/", "-")
 
                         # Format the message content
                         if getattr(msg, 'media', None):
