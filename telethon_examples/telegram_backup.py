@@ -95,6 +95,7 @@ class InteractiveTelegramClient(TelegramClient):
         dumps = {}
         minId = {}
         maxId = {}
+        allowedIds = []
 
         if os.path.exists("output/offsets.json"):
             with open("output/offsets.json") as outfile:
@@ -102,7 +103,15 @@ class InteractiveTelegramClient(TelegramClient):
                 for key in maxIdJson:
                     maxId[int(key)] = maxIdJson[key]
 
+        if os.path.exists("output/allow.json"):
+            with open("output/allow.json") as allowfile:
+                jdata = json.load(allowfile)
+                allowedIds = jdata["Allow"]
+
         for entity in entities:
+            if entity.id not in allowedIds:
+                continue
+
             minId[entity.id] = 2147483647
 
             if entity.id not in maxId:
@@ -175,7 +184,6 @@ class InteractiveTelegramClient(TelegramClient):
                                 #The media may or may not have a caption
                                 caption = getattr(msg.media, 'caption', '')
                                 content = '<{}> {}'.format(type(msg.media).__name__, caption)
-
                         elif hasattr(msg, 'message'):
                             content = msg.message
                         elif hasattr(msg, 'action'):
