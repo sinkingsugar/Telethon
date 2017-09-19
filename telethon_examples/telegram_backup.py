@@ -107,9 +107,11 @@ class InteractiveTelegramClient(TelegramClient):
             with open("output/allow.json") as allowfile:
                 jdata = json.load(allowfile)
                 allowedIds = jdata["Allow"]
+                for allowedId in allowedIds:
+                    print(allowedId)
 
         for entity in entities:
-            if entity.id not in allowedIds:
+            if str(entity.id) not in allowedIds:
                 continue
 
             minId[entity.id] = 2147483647
