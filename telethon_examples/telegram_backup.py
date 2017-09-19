@@ -154,7 +154,7 @@ class InteractiveTelegramClient(TelegramClient):
                                     output = str('output/usermedia/{}/{}'.format(senderName, msg_media_id)) + ".jpg"
                                     if not os.path.exists(output):
                                         print('Downloading Web picture with name {}...'.format(output))
-                                        output = self.download_media(msg.media.webpage, output, self.download_progress_callback)
+                                        output = self._download_photo(msg.media.webpage, output, None, self.download_progress_callback)
                                         print('Web picture downloaded to {}!'.format(output))
                                     else:
                                         print('Web picture already downloaded to {}!'.format(output))
