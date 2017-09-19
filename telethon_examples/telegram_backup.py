@@ -5,7 +5,7 @@ import json
 import os.path
 import time
 import datetime
-from telethon import TelegramClient
+from telethon import TelegramClient, ConnectionMode
 from telethon.errors import SessionPasswordNeededError
 from telethon.errors import (ServerError, FloodWaitError)
 from telethon.tl.types import UpdateShortChatMessage, UpdateShortMessage
