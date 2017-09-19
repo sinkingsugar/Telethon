@@ -57,7 +57,7 @@ class InteractiveTelegramClient(TelegramClient):
         print_title('Initialization')
 
         print('Initializing interactive example...')
-        super().__init__(session_user_id, api_id, api_hash, proxy)
+        super().__init__(session_user_id, api_id, api_hash, connection_mode=ConnectionMode.TCP_ABRIDGED, proxy=proxy)
 
         print('Connecting to Telegram servers...')
         if not self.connect():
