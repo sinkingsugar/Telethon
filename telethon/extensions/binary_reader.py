@@ -23,10 +23,12 @@ class BinaryReader:
                 'Either bytes or a stream must be provided')
 
         self.reader = BufferedReader(self.stream)
+        self._last = None  # Should come in handy to spot -404 errors
 
     # region Reading
 
-    # "All numbers are written as little endian." |> Source: https://core.telegram.org/mtproto
+    # "All numbers are written as little endian."
+    # https://core.telegram.org/mtproto
     def read_byte(self):
         """Reads a single byte value"""
         return self.read(1)[0]
@@ -57,8 +59,11 @@ class BinaryReader:
         result = self.reader.read(length)
         if len(result) != length:
             raise BufferError(
-                'Trying to read outside the data bounds (no more data left to read)')
+                'No more data left to read (need {}, got {}: {}); last read {}'
+                .format(length, len(result), repr(result), repr(self._last))
+            )
 
+        self._last = result
         return result
 
     def get_bytes(self):
@@ -70,7 +75,9 @@ class BinaryReader:
     # region Telegram custom reading
 
     def tgread_bytes(self):
-        """Reads a Telegram-encoded byte array, without the need of specifying its length"""
+        """Reads a Telegram-encoded byte array,
+           without the need of specifying its length
+        """
         first_byte = self.read_byte()
         if first_byte == 254:
             length = self.read_byte() | (self.read_byte() << 8) | (
@@ -102,7 +109,9 @@ class BinaryReader:
             raise ValueError('Invalid boolean code {}'.format(hex(value)))
 
     def tgread_date(self):
-        """Reads and converts Unix time (used by Telegram) into a Python datetime object"""
+        """Reads and converts Unix time (used by Telegram)
+           into a Python datetime object
+        """
         value = self.read_int()
         return None if value == 0 else datetime.fromtimestamp(value)
 
@@ -152,7 +161,9 @@ class BinaryReader:
         self.reader.seek(position)
 
     def seek(self, offset):
-        """Seeks the stream position given an offset from the current position. May be negative"""
+        """Seeks the stream position given an offset from the
+           current position. The offset may be negative
+        """
         self.reader.seek(offset, os.SEEK_CUR)
 
     # endregion

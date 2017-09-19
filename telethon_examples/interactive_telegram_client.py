@@ -1,6 +1,7 @@
+import os
 from getpass import getpass
 
-from telethon import TelegramClient
+from telethon import TelegramClient, ConnectionMode
 from telethon.errors import SessionPasswordNeededError
 from telethon.tl.types import UpdateShortChatMessage, UpdateShortMessage
 from telethon.utils import get_display_name
@@ -48,7 +49,11 @@ class InteractiveTelegramClient(TelegramClient):
         print_title('Initialization')
 
         print('Initializing interactive example...')
-        super().__init__(session_user_id, api_id, api_hash, proxy)
+        super().__init__(
+            session_user_id, api_id, api_hash,
+            connection_mode=ConnectionMode.TCP_ABRIDGED,
+            proxy=proxy
+        )
 
         # Store all the found media in memory here,
         # so it can be downloaded if the user wants
@@ -201,43 +206,41 @@ class InteractiveTelegramClient(TelegramClient):
                 # Download media
                 elif msg.startswith('!dm '):
                     # Slice the message to get message ID
-                    self.download_media(msg[len('!dm '):])
+                    self.download_media_by_id(msg[len('!dm '):])
 
                 # Download profile photo
                 elif msg == '!dp':
-                    output = str('usermedia/propic_{}'.format(entity.id))
-                    print('Downloading profile picture...')
-                    success = self.download_profile_photo(entity.photo, output)
-                    if success:
-                        print('Profile picture downloaded to {}'.format(
-                            output))
+                    print('Downloading profile picture to usermedia/...')
+                    os.makedirs('usermedia', exist_ok=True)
+                    output = self.download_profile_photo(entity, 'usermedia')
+                    if output:
+                        print(
+                            'Profile picture downloaded to {}'.format(output)
+                        )
                     else:
                         print('No profile picture found for this user.')
 
                 # Send chat message (if any)
                 elif msg:
                     self.send_message(
-                        entity, msg, no_web_page=True)
+                        entity, msg, link_preview=False)
 
     def send_photo(self, path, entity):
-        print('Uploading {}...'.format(path))
-        input_file = self.upload_file(
-            path, progress_callback=self.upload_progress_callback)
-
-        # After we have the handle to the uploaded file, send it to our peer
-        self.send_photo_file(input_file, entity)
+        self.send_file(
+            entity, path,
+            progress_callback=self.upload_progress_callback
+        )
         print('Photo sent!')
 
     def send_document(self, path, entity):
-        print('Uploading {}...'.format(path))
-        input_file = self.upload_file(
-            path, progress_callback=self.upload_progress_callback)
-
-        # After we have the handle to the uploaded file, send it to our peer
-        self.send_document_file(input_file, entity)
+        self.send_file(
+            entity, path,
+            force_document=True,
+            progress_callback=self.upload_progress_callback
+        )
         print('Document sent!')
 
-    def download_media(self, media_id):
+    def download_media_by_id(self, media_id):
         try:
             # The user may have entered a non-integer string!
             msg_media_id = int(media_id)
@@ -245,13 +248,13 @@ class InteractiveTelegramClient(TelegramClient):
             # Search the message ID
             for msg in self.found_media:
                 if msg.id == msg_media_id:
-                    # Let the output be the message ID
-                    output = str('usermedia/{}'.format(msg_media_id))
-                    print('Downloading media with name {}...'.format(output))
-                    output = self.download_msg_media(
+                    print('Downloading media to usermedia/...')
+                    os.makedirs('usermedia', exist_ok=True)
+                    output = self.download_media(
                         msg.media,
-                        file_path=output,
-                        progress_callback=self.download_progress_callback)
+                        file='usermedia/',
+                        progress_callback=self.download_progress_callback
+                    )
                     print('Media downloaded to {}!'.format(output))
 
         except ValueError:
@@ -275,7 +278,7 @@ class InteractiveTelegramClient(TelegramClient):
 
     @staticmethod
     def update_handler(update_object):
-        if type(update_object) is UpdateShortMessage:
+        if isinstance(update_object, UpdateShortMessage):
             if update_object.out:
                 sprint('You sent {} to user #{}'.format(
                     update_object.message, update_object.user_id))
@@ -283,7 +286,7 @@ class InteractiveTelegramClient(TelegramClient):
                 sprint('[User #{} sent {}]'.format(
                     update_object.user_id, update_object.message))
 
-        elif type(update_object) is UpdateShortChatMessage:
+        elif isinstance(update_object, UpdateShortChatMessage):
             if update_object.out:
                 sprint('You sent {} to chat #{}'.format(
                     update_object.message, update_object.chat_id))

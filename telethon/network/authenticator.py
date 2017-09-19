@@ -3,22 +3,38 @@ import time
 from hashlib import sha1
 
 from .. import helpers as utils
-from ..crypto import AES, RSA, AuthKey, Factorization
-from ..network import MtProtoPlainSender
+from ..crypto import AES, AuthKey, Factorization
+from ..crypto import rsa
+from ..errors import SecurityError, TypeNotFoundError
 from ..extensions import BinaryReader, BinaryWriter
+from ..network import MtProtoPlainSender
 
 
-def do_authentication(transport):
+def do_authentication(connection, retries=5):
+    if not retries or retries < 0:
+        retries = 1
+
+    last_error = None
+    while retries:
+        try:
+            return _do_authentication(connection)
+        except (SecurityError, TypeNotFoundError, NotImplementedError) as e:
+            last_error = e
+        retries -= 1
+    raise last_error
+
+
+def _do_authentication(connection):
     """Executes the authentication process with the Telegram servers.
        If no error is raised, returns both the authorization key and the
        time offset.
     """
-    sender = MtProtoPlainSender(transport)
+    sender = MtProtoPlainSender(connection)
     sender.connect()
 
     # Step 1 sending: PQ Request
     nonce = os.urandom(16)
-    with BinaryWriter() as writer:
+    with BinaryWriter(known_length=20) as writer:
         writer.write_int(0x60469778, signed=False)  # Constructor number
         writer.write(nonce)
         sender.send(writer.get_bytes())
@@ -28,12 +44,11 @@ def do_authentication(transport):
     with BinaryReader(sender.receive()) as reader:
         response_code = reader.read_int(signed=False)
         if response_code != 0x05162463:
-            raise AssertionError('Invalid response code: {}'.format(
-                hex(response_code)))
+            raise TypeNotFoundError(response_code)
 
         nonce_from_server = reader.read(16)
         if nonce_from_server != nonce:
-            raise AssertionError('Invalid nonce from server')
+            raise SecurityError('Invalid nonce from server')
 
         server_nonce = reader.read(16)
 
@@ -42,8 +57,7 @@ def do_authentication(transport):
 
         vector_id = reader.read_int()
         if vector_id != 0x1cb5c415:
-            raise AssertionError('Invalid vector constructor ID: {}'.format(
-                hex(response_code)))
+            raise TypeNotFoundError(response_code)
 
         fingerprints = []
         fingerprint_count = reader.read_int()
@@ -56,44 +70,38 @@ def do_authentication(transport):
     with BinaryWriter() as pq_inner_data_writer:
         pq_inner_data_writer.write_int(
             0x83c95aec, signed=False)  # PQ Inner Data
-        pq_inner_data_writer.tgwrite_bytes(get_byte_array(pq, signed=False))
-        pq_inner_data_writer.tgwrite_bytes(
-            get_byte_array(
-                min(p, q), signed=False))
-        pq_inner_data_writer.tgwrite_bytes(
-            get_byte_array(
-                max(p, q), signed=False))
+        pq_inner_data_writer.tgwrite_bytes(rsa.get_byte_array(pq))
+        pq_inner_data_writer.tgwrite_bytes(rsa.get_byte_array(min(p, q)))
+        pq_inner_data_writer.tgwrite_bytes(rsa.get_byte_array(max(p, q)))
         pq_inner_data_writer.write(nonce)
         pq_inner_data_writer.write(server_nonce)
         pq_inner_data_writer.write(new_nonce)
 
+        # sha_digest + data + random_bytes
         cipher_text, target_fingerprint = None, None
         for fingerprint in fingerprints:
-            cipher_text = RSA.encrypt(
-                get_fingerprint_text(fingerprint),
-                pq_inner_data_writer.get_bytes())
+            cipher_text = rsa.encrypt(
+                fingerprint,
+                pq_inner_data_writer.get_bytes()
+            )
 
             if cipher_text is not None:
                 target_fingerprint = fingerprint
                 break
 
         if cipher_text is None:
-            raise AssertionError(
+            raise SecurityError(
                 'Could not find a valid key for fingerprints: {}'
-                .format(', '.join([get_fingerprint_text(f)
-                                   for f in fingerprints])))
+                .format(', '.join([repr(f) for f in fingerprints]))
+            )
 
         with BinaryWriter() as req_dh_params_writer:
             req_dh_params_writer.write_int(
                 0xd712e4be, signed=False)  # Req DH Params
             req_dh_params_writer.write(nonce)
             req_dh_params_writer.write(server_nonce)
-            req_dh_params_writer.tgwrite_bytes(
-                get_byte_array(
-                    min(p, q), signed=False))
-            req_dh_params_writer.tgwrite_bytes(
-                get_byte_array(
-                    max(p, q), signed=False))
+            req_dh_params_writer.tgwrite_bytes(rsa.get_byte_array(min(p, q)))
+            req_dh_params_writer.tgwrite_bytes(rsa.get_byte_array(max(p, q)))
             req_dh_params_writer.write(target_fingerprint)
             req_dh_params_writer.tgwrite_bytes(cipher_text)
 
@@ -106,19 +114,18 @@ def do_authentication(transport):
         response_code = reader.read_int(signed=False)
 
         if response_code == 0x79cb045d:
-            raise AssertionError('Server DH params fail: TODO')
+            raise SecurityError('Server DH params fail: TODO')
 
         if response_code != 0xd0e8075c:
-            raise AssertionError('Invalid response code: {}'.format(
-                hex(response_code)))
+            raise TypeNotFoundError(response_code)
 
         nonce_from_server = reader.read(16)
         if nonce_from_server != nonce:
-            raise NotImplementedError('Invalid nonce from server')
+            raise SecurityError('Invalid nonce from server')
 
         server_nonce_from_server = reader.read(16)
         if server_nonce_from_server != server_nonce:
-            raise NotImplementedError('Invalid server nonce from server')
+            raise SecurityError('Invalid server nonce from server')
 
         encrypted_answer = reader.tgread_bytes()
 
@@ -131,15 +138,15 @@ def do_authentication(transport):
         dh_inner_data_reader.read(20)  # hash sum
         code = dh_inner_data_reader.read_int(signed=False)
         if code != 0xb5890dba:
-            raise AssertionError('Invalid DH Inner Data code: {}'.format(code))
+            raise TypeNotFoundError(code)
 
         nonce_from_server1 = dh_inner_data_reader.read(16)
         if nonce_from_server1 != nonce:
-            raise AssertionError('Invalid nonce in encrypted answer')
+            raise SecurityError('Invalid nonce in encrypted answer')
 
         server_nonce_from_server1 = dh_inner_data_reader.read(16)
         if server_nonce_from_server1 != server_nonce:
-            raise AssertionError('Invalid server nonce in encrypted answer')
+            raise SecurityError('Invalid server nonce in encrypted answer')
 
         g = dh_inner_data_reader.read_int()
         dh_prime = get_int(dh_inner_data_reader.tgread_bytes(), signed=False)
@@ -148,7 +155,7 @@ def do_authentication(transport):
         server_time = dh_inner_data_reader.read_int()
         time_offset = server_time - int(time.time())
 
-    b = get_int(os.urandom(2048), signed=False)
+    b = get_int(os.urandom(256), signed=False)
     gb = pow(g, b, dh_prime)
     gab = pow(ga, b, dh_prime)
 
@@ -159,9 +166,7 @@ def do_authentication(transport):
         client_dh_inner_data_writer.write(nonce)
         client_dh_inner_data_writer.write(server_nonce)
         client_dh_inner_data_writer.write_long(0)  # TODO retry_id
-        client_dh_inner_data_writer.tgwrite_bytes(
-            get_byte_array(
-                gb, signed=False))
+        client_dh_inner_data_writer.tgwrite_bytes(rsa.get_byte_array(gb))
 
         with BinaryWriter() as client_dh_inner_data_with_hash_writer:
             client_dh_inner_data_with_hash_writer.write(
@@ -197,19 +202,19 @@ def do_authentication(transport):
         if code == 0x3bcbf734:  # DH Gen OK
             nonce_from_server = reader.read(16)
             if nonce_from_server != nonce:
-                raise NotImplementedError('Invalid nonce from server')
+                raise SecurityError('Invalid nonce from server')
 
             server_nonce_from_server = reader.read(16)
             if server_nonce_from_server != server_nonce:
-                raise NotImplementedError('Invalid server nonce from server')
+                raise SecurityError('Invalid server nonce from server')
 
             new_nonce_hash1 = reader.read(16)
-            auth_key = AuthKey(get_byte_array(gab, signed=False))
+            auth_key = AuthKey(rsa.get_byte_array(gab))
 
             new_nonce_hash_calculated = auth_key.calc_new_nonce_hash(new_nonce,
                                                                      1)
             if new_nonce_hash1 != new_nonce_hash_calculated:
-                raise AssertionError('Invalid new nonce hash')
+                raise SecurityError('Invalid new nonce hash')
 
             return auth_key, time_offset
 
@@ -220,27 +225,12 @@ def do_authentication(transport):
             raise NotImplementedError('dh_gen_fail')
 
         else:
-            raise AssertionError('DH Gen unknown: {}'.format(hex(code)))
-
-
-def get_fingerprint_text(fingerprint):
-    """Gets a fingerprint text in 01-23-45-67-89-AB-CD-EF format (no hyphens)"""
-    return ''.join(hex(b)[2:].rjust(2, '0').upper() for b in fingerprint)
-
-
-# The following methods operate in big endian (unlike most of Telegram API) because:
-# > "...pq is a representation of a natural number (in binary *big endian* format)..."
-# > "...current value of dh_prime equals (in *big-endian* byte order)..."
-# Reference: https://core.telegram.org/mtproto/auth_key
-def get_byte_array(integer, signed):
-    """Gets the arbitrary-length byte array corresponding to the given integer"""
-    bits = integer.bit_length()
-    byte_length = (bits + 8 - 1) // 8  # 8 bits per byte
-    return int.to_bytes(
-        integer, length=byte_length, byteorder='big', signed=signed)
+            raise NotImplementedError('DH Gen unknown: {}'.format(hex(code)))
 
 
 def get_int(byte_array, signed=True):
-    """Gets the specified integer from its byte array. This should be used by the authenticator,
-       who requires the data to be in big endian"""
+    """Gets the specified integer from its byte array.
+       This should be used by the authenticator,
+       who requires the data to be in big endian
+    """
     return int.from_bytes(byte_array, byteorder='big', signed=signed)

@@ -30,8 +30,31 @@ class InvalidChecksumError(Exception):
     def __init__(self, checksum, valid_checksum):
         super().__init__(
             self,
-            'Invalid checksum ({} when {} was expected). This packet should be skipped.'
+            'Invalid checksum ({} when {} was expected). '
+            'This packet should be skipped.'
             .format(checksum, valid_checksum))
 
         self.checksum = checksum
         self.valid_checksum = valid_checksum
+
+
+class BrokenAuthKeyError(Exception):
+    def __init__(self):
+        super().__init__(
+            self,
+            'The authorization key is broken, and it must be reset.'
+        )
+
+
+class SecurityError(Exception):
+    def __init__(self, *args):
+        if not args:
+            args = ['A security check failed.']
+        super().__init__(self, *args)
+
+
+class CdnFileTamperedError(SecurityError):
+    def __init__(self):
+        super().__init__(
+            'The CDN file has been altered and its download cancelled.'
+        )
