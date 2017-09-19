@@ -22,7 +22,9 @@ class ChannelInvalidError(BadRequestError):
     def __init__(self, **kwargs):
         super(Exception, self).__init__(
             self,
-            'Invalid channel object. Make sure to pass the right types.'
+            'Invalid channel object. Make sure to pass the right types,'
+            ' for instance making sure that the request is designed for '
+            'channels or otherwise look for a different one more suited.'
         )
 
 
@@ -40,7 +42,21 @@ class ChatIdInvalidError(BadRequestError):
     def __init__(self, **kwargs):
         super(Exception, self).__init__(
             self,
-            'Invalid object ID for a chat. Make sure to pass the right types.'
+            'Invalid object ID for a chat. Make sure to pass the right types,'
+            ' for instance making sure that the request is designed for chats'
+            ' (not channels/megagroups) or otherwise look for a different one'
+            ' more suited.\nAn example working with a megagroup and'
+            ' AddChatUserRequest, it will fail because megagroups are channels'
+            '. Use InviteToChannelRequest instead.'
+        )
+
+
+class ConnectionLangPackInvalid(BadRequestError):
+    def __init__(self, **kwargs):
+        super(Exception, self).__init__(
+            self,
+            'The specified language pack is not valid. This is meant to be '
+            'used by official applications only so far, leave it empty.'
         )
 
 
@@ -159,6 +175,14 @@ class MessageTooLongError(BadRequestError):
         )
 
 
+class MessageNotModifiedError(BadRequestError):
+    def __init__(self, **kwargs):
+        super(Exception, self).__init__(
+            self,
+            'Content of the message was not modified.'
+        )
+
+
 class MsgWaitFailedError(BadRequestError):
     def __init__(self, **kwargs):
         super(Exception, self).__init__(
@@ -268,7 +292,7 @@ class UsernameInvalidError(BadRequestError):
     def __init__(self, **kwargs):
         super(Exception, self).__init__(
             self,
-            'Unacceptable username. Must match r"[a-zA-Z][\w\d]{4,32}"'
+            'Unacceptable username. Must match r"[a-zA-Z][\w\d]{4,31}".'
         )
 
 
@@ -276,7 +300,7 @@ class UsernameNotModifiedError(BadRequestError):
     def __init__(self, **kwargs):
         super(Exception, self).__init__(
             self,
-            'The username is not different from the current username'
+            'The username is not different from the current username.'
         )
 
 
@@ -284,7 +308,7 @@ class UsernameNotOccupiedError(BadRequestError):
     def __init__(self, **kwargs):
         super(Exception, self).__init__(
             self,
-            'See issue #96 for Telethon - try upgrading the library.'
+            'The username is not in use by anyone else yet.'
         )
 
 
@@ -317,11 +341,13 @@ class UserIdInvalidError(BadRequestError):
     def __init__(self, **kwargs):
         super(Exception, self).__init__(
             self,
-            'Invalid object ID for an user. Make sure to pass the right types.'
+            'Invalid object ID for an user. Make sure to pass the right types,'
+            'for instance making sure that the request is designed for users'
+            'or otherwise look for a different one more suited.'
         )
 
 
-rpc_400_errors = {
+rpc_errors_400_all = {
     'API_ID_INVALID': ApiIdInvalidError,
     'BOT_METHOD_INVALID': BotMethodInvalidError,
     'CHANNEL_INVALID': ChannelInvalidError,
@@ -341,6 +367,7 @@ rpc_400_errors = {
     'MESSAGE_EMPTY': MessageEmptyError,
     'MESSAGE_ID_INVALID': MessageIdInvalidError,
     'MESSAGE_TOO_LONG': MessageTooLongError,
+    'MESSAGE_NOT_MODIFIED': MessageNotModifiedError,
     'MSG_WAIT_FAILED': MsgWaitFailedError,
     'PASSWORD_HASH_INVALID': PasswordHashInvalidError,
     'PEER_ID_INVALID': PeerIdInvalidError,

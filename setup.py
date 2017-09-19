@@ -1,87 +1,110 @@
+#!/usr/bin/env python3
 """A setuptools based setup module.
 
 See:
 https://packaging.python.org/en/latest/distributing.html
 https://github.com/pypa/sampleproject
+
+Extra supported commands are:
+* gen_tl, to generate the classes required for Telethon to run
+* clean_tl, to clean these generated classes
+* pypi, to generate sdist, bdist_wheel, and push to PyPi
 """
 
 # To use a consistent encoding
+from subprocess import run
+from shutil import rmtree
 from codecs import open
+from sys import argv
 from os import path
 
 # Always prefer setuptools over distutils
 from setuptools import find_packages, setup
 
-from telethon import TelegramClient
+try:
+    from telethon import TelegramClient
+except ImportError:
+    TelegramClient = None
 
-here = path.abspath(path.dirname(__file__))
 
-# Get the long description from the README file
-with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
-    long_description = f.read()
+if __name__ == '__main__':
+    if len(argv) >= 2 and argv[1] == 'gen_tl':
+        from telethon_generator.tl_generator import TLGenerator
+        generator = TLGenerator('telethon/tl')
+        if generator.tlobjects_exist():
+            print('Detected previous TLObjects. Cleaning...')
+            generator.clean_tlobjects()
 
-setup(
-    name='Telethon',
+        print('Generating TLObjects...')
+        generator.generate_tlobjects(
+            'telethon_generator/scheme.tl', import_depth=2
+        )
+        print('Done.')
 
-    # Versions should comply with PEP440.
-    version=TelegramClient.__version__,
-    description="Python3 Telegram's client implementation with full access to its API",
-    long_description=long_description,
+    elif len(argv) >= 2 and argv[1] == 'clean_tl':
+        from telethon_generator.tl_generator import TLGenerator
+        print('Cleaning...')
+        TLGenerator('telethon/tl').clean_tlobjects()
+        print('Done.')
 
-    # The project's main homepage.
-    url='https://github.com/LonamiWebs/Telethon',
-    download_url='https://github.com/LonamiWebs/Telethon/releases',
+    elif len(argv) >= 2 and argv[1] == 'pypi':
+        for x in ('build', 'dist', 'Telethon.egg-info'):
+            rmtree(x, ignore_errors=True)
+        run('python3 setup.py sdist', shell=True)
+        run('python3 setup.py bdist_wheel', shell=True)
+        run('twine upload dist/*', shell=True)
+        for x in ('build', 'dist', 'Telethon.egg-info'):
+            rmtree(x, ignore_errors=True)
 
-    # Author details
-    author='Lonami Exo',
-    author_email='totufals@hotmail.com',
+    else:
+        if not TelegramClient:
+            print('Run `python3', argv[0], 'gen_tl` first.')
+            quit()
 
-    # Choose your license
-    license='MIT',
+        here = path.abspath(path.dirname(__file__))
 
-    # See https://pypi.python.org/pypi?%3Aaction=list_classifiers
-    classifiers=[
-        # How mature is this project? Common values are
-        #   3 - Alpha
-        #   4 - Beta
-        #   5 - Production/Stable
-        'Development Status :: 3 - Alpha',
+        # Get the long description from the README file
+        with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
+            long_description = f.read()
 
-        # Indicate who your project is intended for
-        'Intended Audience :: Developers',
-        'Topic :: Communications :: Chat',
+        setup(
+            name='Telethon',
 
-        # Pick your license as you wish (should match "license" above)
-        'License :: OSI Approved :: MIT License',
+            # Versions should comply with PEP440.
+            version=TelegramClient.__version__,
+            description="Full-featured Telegram client library for Python 3",
+            long_description=long_description,
 
-        # Specify the Python versions you support here. In particular, ensure
-        # that you indicate whether you support Python 2, Python 3 or both.
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6'
-    ],
+            url='https://github.com/LonamiWebs/Telethon',
+            download_url='https://github.com/LonamiWebs/Telethon/releases',
 
-    # What does your project relate to?
-    keywords='Telegram API chat client MTProto',
+            author='Lonami Exo',
+            author_email='totufals@hotmail.com',
 
-    # You can just specify the packages manually here if your project is
-    # simple. Or you can use find_packages().
-    packages=find_packages(exclude=[
-        'telethon_generator', 'telethon_tests', 'run_tests.py',
-        'try_telethon.py'
-    ]),
+            license='MIT',
 
-    # List run-time dependencies here. These will be installed by pip when
-    # your project is installed.
-    install_requires=['pyaes'],
+            # See https://pypi.python.org/pypi?%3Aaction=list_classifiers
+            classifiers=[
+                #   3 - Alpha
+                #   4 - Beta
+                #   5 - Production/Stable
+                'Development Status :: 3 - Alpha',
 
-    # To provide executable scripts, use entry points in preference to the
-    # "scripts" keyword. Entry points provide cross-platform support and allow
-    # pip to create the appropriate form of executable for the target platform.
-    entry_points={
-        'console_scripts': [
-            'gen_tl = tl_generator:clean_and_generate',
-        ],
-    })
+                'Intended Audience :: Developers',
+                'Topic :: Communications :: Chat',
+
+                'License :: OSI Approved :: MIT License',
+
+                'Programming Language :: Python :: 3',
+                'Programming Language :: Python :: 3.3',
+                'Programming Language :: Python :: 3.4',
+                'Programming Language :: Python :: 3.5',
+                'Programming Language :: Python :: 3.6'
+            ],
+            keywords='telegram api chat client library messaging mtproto',
+            packages=find_packages(exclude=[
+                'telethon_generator', 'telethon_tests', 'run_tests.py',
+                'try_telethon.py'
+            ]),
+            install_requires=['pyaes', 'rsa']
+        )
